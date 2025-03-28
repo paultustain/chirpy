@@ -24,7 +24,7 @@ func respondWithError(w http.ResponseWriter, code int, msg string) {
 	if respErr != nil {
 		fmt.Printf("failed to marshal response: %s", respErr)
 	}
-	w.WriteHeader(400)
+	w.WriteHeader(code)
 	w.Write(dat)
 }
 
@@ -52,7 +52,6 @@ func handlerValidate(w http.ResponseWriter, r *http.Request) {
 	dat, err := json.Marshal(resp)
 	if err != nil {
 		respondWithError(w, 400, fmt.Sprintf("failed to marshal: %s", err))
-
 		return
 	}
 
