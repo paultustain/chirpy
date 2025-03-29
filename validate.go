@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 )
 
 type chirpBody struct {
@@ -11,8 +12,21 @@ type chirpBody struct {
 }
 
 type validateResponse struct {
-	Valid bool   `json:"valid,omitempty"`
-	Error string `json:"error,omitempty"`
+	Valid       bool   `json:"valid,omitempty"`
+	Error       string `json:"error,omitempty"`
+	CleanedBody string `json:"cleaned_body,omitempty"`
+}
+
+func replaceWords(body string) string {
+	words := strings.Split(body, " ")
+
+	for i := range words {
+		if (strings.ToLower(words[i]) == "kerfuffle") || (strings.ToLower(words[i]) == "sharbert") || (strings.ToLower(words[i]) == "fornax") {
+			words[i] = "****"
+		}
+
+	}
+	return strings.Join(words, " ")
 }
 
 func respondWithError(w http.ResponseWriter, code int, msg string) {
@@ -46,7 +60,8 @@ func handlerValidate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := &validateResponse{
-		Valid: true,
+		Valid:       true,
+		CleanedBody: replaceWords(chirp.Body),
 	}
 
 	dat, err := json.Marshal(resp)
