@@ -40,6 +40,7 @@ func main() {
 		db:       dbQueries,
 		platform: os.Getenv("PLATFORM"),
 	}
+
 	if os.Getenv("PLATFORM") == "" {
 		log.Fatal("PLATFORM must be set")
 	}
@@ -49,7 +50,7 @@ func main() {
 	mux.Handle("/app/", apiCfg.middlewareMetricsInc(http.StripPrefix("/app", fs)))
 
 	mux.HandleFunc("GET /api/healthz", handlerReadiness)
-	mux.HandleFunc("POST /api/validate_chirp", handlerValidate)
+	mux.HandleFunc("POST /api/chirps", apiCfg.handlerChirp)
 	mux.HandleFunc("POST /api/users", apiCfg.handlerUsers)
 
 	mux.HandleFunc("GET /admin/metrics", apiCfg.handlerMetrics)

@@ -40,7 +40,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 }
 
 const resetUsers = `-- name: ResetUsers :exec
-TRUNCATE TABLE users
+TRUNCATE TABLE users, chirps CASCADE
 `
 
 func (q *Queries) ResetUsers(ctx context.Context) error {
