@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -12,23 +11,12 @@ import (
 	"github.com/google/uuid"
 )
 
-type chirpBody struct {
-	Body   string    `json:"body"`
-	UserID uuid.UUID `json:"user_id"`
-}
-
 type Chirp struct {
 	ID        uuid.UUID `json:"id"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Body      string    `json:"body"`
 	UserID    uuid.UUID `json:"user_id"`
-}
-
-type validateResponse struct {
-	Valid       bool   `json:"valid,omitempty"`
-	Error       string `json:"error,omitempty"`
-	CleanedBody string `json:"cleaned_body,omitempty"`
 }
 
 func replaceWords(body string) string {
@@ -43,75 +31,105 @@ func replaceWords(body string) string {
 	return strings.Join(words, " ")
 }
 
-func respondWithError(w http.ResponseWriter, code int, msg string) {
-	fmt.Println(msg)
-	resp := &validateResponse{
-		Error: msg,
-	}
-	dat, respErr := json.Marshal(resp)
-	if respErr != nil {
-		fmt.Printf("failed to marshal response: %s", respErr)
-	}
-	w.WriteHeader(code)
-	w.Write(dat)
-}
-
-func validateChirp(chirp string) (validateResponse, error) {
+func validateChirp(chirp string) (string, error) {
 
 	if len(chirp) > 140 {
-		return validateResponse{}, errors.New("chirp too long")
+		return "", errors.New("chirp too long")
 	}
 
-	resp := &validateResponse{
-		Valid:       true,
-		CleanedBody: replaceWords(chirp),
-	}
-
-	return *resp, nil
+	return replaceWords(chirp), nil
 
 }
 
-func (cfg *apiConfig) handlerChirp(w http.ResponseWriter, r *http.Request) {
+func (cfg *apiConfig) handlerChirpsCreate(w http.ResponseWriter, r *http.Request) {
+
+	type Params struct {
+		Body   string `json:"body"`
+		UserID string `json:"user_id"`
+	}
+
 	decoder := json.NewDecoder(r.Body)
-	chirpOriginal := chirpBody{}
-	err := decoder.Decode(&chirpOriginal)
+	params := Params{}
+	err := decoder.Decode(&params)
 	if err != nil {
-		respondWithError(w, 400, fmt.Sprintf("something went wrong: %s", err))
+		respondWithError(w, http.StatusInternalServerError, "something went wrong:", err)
 		return
 	}
 
-	chirp, err := validateChirp(chirpOriginal.Body)
+	cleanedChirp, err := validateChirp(params.Body)
 	if err != nil {
-		respondWithError(w, 400, fmt.Sprintf("failed to validate: %s", err))
+		respondWithError(w, http.StatusBadRequest, "failed to validate:", err)
 		return
 	}
-	resp := Chirp{
-		ID:        uuid.New(),
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-		Body:      replaceWords(chirp.CleanedBody),
-		UserID:    chirpOriginal.UserID,
-	}
 
-	dat, err := json.Marshal(&resp)
+	userID, err := uuid.Parse(params.UserID)
 	if err != nil {
-		respondWithError(w, 400, fmt.Sprintf("failed to marshal: %s", err))
-	}
+		respondWithError(w, http.StatusBadRequest, "failed to generate userid:", err)
+		return
 
-	cfg.db.CreateChirp(r.Context(), database.CreateChirpParams{
-		ID:   uuid.New(),
-		Body: replaceWords(chirp.CleanedBody),
-		UserID: uuid.NullUUID{
-			UUID:  chirpOriginal.UserID,
-			Valid: true,
-		},
+	}
+	chirp, err := cfg.db.CreateChirp(r.Context(), database.CreateChirpParams{
+		Body:   cleanedChirp,
+		UserID: userID,
 	})
 
 	if err != nil {
+		respondWithError(
+			w,
+			http.StatusInternalServerError,
+			"failed to create chirp in db: ",
+			err,
+		)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(201)
-	w.Write(dat)
+	respondWithJSON(w, http.StatusCreated, Chirp{
+		ID:        chirp.ID,
+		CreatedAt: chirp.CreatedAt,
+		UpdatedAt: chirp.UpdatedAt,
+		Body:      chirp.Body,
+		UserID:    chirp.UserID,
+	})
+}
+func (cfg *apiConfig) handlerChirpsRetrieve(w http.ResponseWriter, r *http.Request) {
+	dbChirps, err := cfg.db.GetChirps(r.Context())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't retrieve chirps", err)
+		return
+	}
+
+	chirps := []Chirp{}
+	for _, dbChirp := range dbChirps {
+		chirps = append(chirps, Chirp{
+			ID:        dbChirp.ID,
+			CreatedAt: dbChirp.CreatedAt,
+			UpdatedAt: dbChirp.UpdatedAt,
+			UserID:    dbChirp.UserID,
+			Body:      dbChirp.Body,
+		})
+	}
+
+	respondWithJSON(w, http.StatusOK, chirps)
+}
+
+func (cfg *apiConfig) handlerChirpRetrieve(w http.ResponseWriter, r *http.Request) {
+	param := r.PathValue("chirpID")
+	chirpID, err := uuid.Parse(param)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "failed to parse chirp ID: ", err)
+		return
+
+	}
+	dbChirp, err := cfg.db.GetChirp(r.Context(), chirpID)
+	if err != nil {
+		respondWithError(w, 404, "failed to get chirp", err)
+		return
+	}
+	respondWithJSON(w, http.StatusOK, Chirp{
+		ID:        dbChirp.ID,
+		CreatedAt: dbChirp.CreatedAt,
+		UpdatedAt: dbChirp.UpdatedAt,
+		Body:      dbChirp.Body,
+		UserID:    dbChirp.UserID,
+	})
 }

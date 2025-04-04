@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -28,22 +27,22 @@ func (cfg *apiConfig) handlerUsers(w http.ResponseWriter, r *http.Request) {
 	err := decoder.Decode(&params)
 
 	if err != nil {
-		respondWithError(w, 400, fmt.Sprintf("failed to decode: %s", err))
+		respondWithError(w, 400, "failed to decode:", err)
 		return
 	}
-
+	userID := uuid.New()
 	_, err = cfg.db.CreateUser(r.Context(), database.CreateUserParams{
-		ID:    uuid.New(),
+		ID:    userID,
 		Email: params.Email,
 	})
 
 	if err != nil {
-		respondWithError(w, 400, fmt.Sprintf("failed to create user in db: %s", err))
+		respondWithError(w, 400, "failed to create user in db:", err)
 		return
 	}
 
 	newUser := User{
-		ID:        uuid.New(),
+		ID:        userID,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 		Email:     params.Email,
@@ -51,7 +50,7 @@ func (cfg *apiConfig) handlerUsers(w http.ResponseWriter, r *http.Request) {
 
 	dat, err := json.Marshal(newUser)
 	if err != nil {
-		respondWithError(w, 400, fmt.Sprintf("failed to marshal: %s", err))
+		respondWithError(w, 400, "failed to marshal:", err)
 		return
 	}
 
