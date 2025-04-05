@@ -5,12 +5,14 @@ import (
 	"net/http"
 	"time"
 
+	"example.com/m/v2/internal/auth"
 	"example.com/m/v2/internal/database"
 	"github.com/google/uuid"
 )
 
 type Parameters struct {
-	Email string `json:"email"`
+	Email    string `json:"email"`
+	Password string `json:"password"`
 }
 
 type User struct {
@@ -30,10 +32,17 @@ func (cfg *apiConfig) handlerUsers(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, 400, "failed to decode:", err)
 		return
 	}
+
+	hashedPassword, err := auth.HashPassword(params.Password)
+	if err != nil {
+		respondWithError(w, 400, "failed to hash password", err)
+		return
+	}
 	userID := uuid.New()
 	_, err = cfg.db.CreateUser(r.Context(), database.CreateUserParams{
-		ID:    userID,
-		Email: params.Email,
+		ID:             userID,
+		Email:          params.Email,
+		HashedPassword: hashedPassword,
 	})
 
 	if err != nil {
@@ -57,4 +66,35 @@ func (cfg *apiConfig) handlerUsers(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(201)
 	w.Write(dat)
+}
+
+func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
+	decoder := json.NewDecoder(r.Body)
+	params := Parameters{}
+	err := decoder.Decode(&params)
+	if err != nil {
+		respondWithError(w, 400, "failed to decode:", err)
+		return
+	}
+	user, err := cfg.db.GetUser(r.Context(), params.Email)
+	if err != nil {
+		respondWithError(w, 400, "failed to get user:", err)
+		return
+	}
+
+	err = auth.CheckPasswordHash(user.HashedPassword, params.Password)
+	if err != nil {
+		respondWithError(w, 401, "incorrect password", err)
+		return
+	}
+	respondWithJSON(
+		w,
+		200,
+		User{
+			ID:        user.ID,
+			CreatedAt: user.CreatedAt,
+			UpdatedAt: user.UpdatedAt,
+			Email:     user.Email,
+		},
+	)
 }
