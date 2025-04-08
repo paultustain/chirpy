@@ -11,8 +11,9 @@ import (
 )
 
 type Parameters struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	Email            string `json:"email"`
+	Password         string `json:"password"`
+	ExpiresInSeconds int    `json:"expires_in_seconds"`
 }
 
 type User struct {
@@ -20,9 +21,13 @@ type User struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Email     string    `json:"email"`
+	Password  string    `json:"-"`
 }
 
 func (cfg *apiConfig) handlerUsers(w http.ResponseWriter, r *http.Request) {
+	type response struct {
+		User
+	}
 
 	decoder := json.NewDecoder(r.Body)
 	params := Parameters{}
@@ -38,63 +43,84 @@ func (cfg *apiConfig) handlerUsers(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, 400, "failed to hash password", err)
 		return
 	}
+
 	userID := uuid.New()
-	_, err = cfg.db.CreateUser(r.Context(), database.CreateUserParams{
+	user, err := cfg.db.CreateUser(r.Context(), database.CreateUserParams{
 		ID:             userID,
 		Email:          params.Email,
 		HashedPassword: hashedPassword,
 	})
 
 	if err != nil {
+
 		respondWithError(w, 400, "failed to create user in db:", err)
 		return
 	}
 
-	newUser := User{
-		ID:        userID,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-		Email:     params.Email,
-	}
-
-	dat, err := json.Marshal(newUser)
-	if err != nil {
-		respondWithError(w, 400, "failed to marshal:", err)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(201)
-	w.Write(dat)
+	respondWithJSON(w, http.StatusCreated, response{
+		User: User{
+			ID:        userID,
+			CreatedAt: user.CreatedAt,
+			UpdatedAt: user.UpdatedAt,
+			Email:     user.Email,
+		},
+	})
 }
 
 func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
+
+	type response struct {
+		User
+		Token        string `json:"token"`
+		RefreshToken string `json:"refresh_token"`
+	}
+
 	decoder := json.NewDecoder(r.Body)
 	params := Parameters{}
 	err := decoder.Decode(&params)
+
 	if err != nil {
 		respondWithError(w, 400, "failed to decode:", err)
 		return
 	}
+
 	user, err := cfg.db.GetUser(r.Context(), params.Email)
 	if err != nil {
 		respondWithError(w, 400, "failed to get user:", err)
 		return
 	}
-
-	err = auth.CheckPasswordHash(user.HashedPassword, params.Password)
+	err = auth.CheckPasswordHash(params.Password, user.HashedPassword)
 	if err != nil {
-		respondWithError(w, 401, "incorrect password", err)
+		respondWithError(w, 401, "using an incorrect password", err)
 		return
 	}
+
+	if params.ExpiresInSeconds <= 0 || params.ExpiresInSeconds > 3600 {
+		params.ExpiresInSeconds = 3600 // Default to 1 hour if out of bounds or omitted
+	}
+
+	token, err := auth.MakeJWT(
+		user.ID,
+		cfg.jwtSecret,
+		time.Duration(params.ExpiresInSeconds)*time.Second,
+	)
+
+	if err != nil {
+		respondWithError(w, 400, "failed to make jwt token:", err)
+		return
+	}
+
 	respondWithJSON(
 		w,
 		200,
-		User{
-			ID:        user.ID,
-			CreatedAt: user.CreatedAt,
-			UpdatedAt: user.UpdatedAt,
-			Email:     user.Email,
+		response{
+			User: User{
+				ID:        user.ID,
+				CreatedAt: user.CreatedAt,
+				UpdatedAt: user.UpdatedAt,
+				Email:     user.Email,
+			},
+			Token: token,
 		},
 	)
 }

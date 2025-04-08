@@ -3,6 +3,8 @@ package auth
 import (
 	"errors"
 	"fmt"
+	"net/http"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -23,7 +25,8 @@ func HashPassword(password string) (string, error) {
 	return string(hash), nil
 }
 
-func CheckPasswordHash(hash, password string) error {
+func CheckPasswordHash(password, hash string) error {
+
 	return bcrypt.CompareHashAndPassword(
 		[]byte(hash),
 		[]byte(password),
@@ -72,4 +75,18 @@ func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 	subject := claims.Subject
 
 	return uuid.Parse(subject)
+}
+
+func GetBearerToken(headers http.Header) (string, error) {
+	bearer := headers.Get("Authorization")
+
+	if bearer == "" {
+		fmt.Print("failing here")
+		return "", errors.New("no authorization header")
+	}
+	splitAuth := strings.Split(bearer, " ")
+	if len(splitAuth) < 2 || splitAuth[0] != "Bearer" {
+		return "", errors.New("malformed authorization header")
+	}
+	return splitAuth[1], nil
 }

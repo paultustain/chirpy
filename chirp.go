@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
+	"example.com/m/v2/internal/auth"
 	"example.com/m/v2/internal/database"
 	"github.com/google/uuid"
 )
@@ -44,13 +46,32 @@ func validateChirp(chirp string) (string, error) {
 func (cfg *apiConfig) handlerChirpsCreate(w http.ResponseWriter, r *http.Request) {
 
 	type Params struct {
-		Body   string `json:"body"`
-		UserID string `json:"user_id"`
+		Body string `json:"body"`
+	}
+
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(
+			w,
+			401,
+			"failed to get bearer token",
+			err,
+		)
+	}
+	userID, err := auth.ValidateJWT(token, os.Getenv("SECRET"))
+
+	if err != nil {
+		respondWithError(
+			w,
+			401,
+			"failed to get validate token",
+			err,
+		)
 	}
 
 	decoder := json.NewDecoder(r.Body)
 	params := Params{}
-	err := decoder.Decode(&params)
+	err = decoder.Decode(&params)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "something went wrong:", err)
 		return
@@ -62,12 +83,6 @@ func (cfg *apiConfig) handlerChirpsCreate(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	userID, err := uuid.Parse(params.UserID)
-	if err != nil {
-		respondWithError(w, http.StatusBadRequest, "failed to generate userid:", err)
-		return
-
-	}
 	chirp, err := cfg.db.CreateChirp(r.Context(), database.CreateChirpParams{
 		Body:   cleanedChirp,
 		UserID: userID,
