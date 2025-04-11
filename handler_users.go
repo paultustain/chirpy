@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 	"time"
 
 	"example.com/m/v2/internal/auth"
@@ -11,9 +12,8 @@ import (
 )
 
 type Parameters struct {
-	Email            string `json:"email"`
-	Password         string `json:"password"`
-	ExpiresInSeconds int    `json:"expires_in_seconds"`
+	Email    string `json:"email"`
+	Password string `json:"password"`
 }
 
 type User struct {
@@ -23,6 +23,8 @@ type User struct {
 	Email     string    `json:"email"`
 	Password  string    `json:"-"`
 }
+
+const ExpiresInSeconds = 3600
 
 func (cfg *apiConfig) handlerUsers(w http.ResponseWriter, r *http.Request) {
 	type response struct {
@@ -95,21 +97,32 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if params.ExpiresInSeconds <= 0 || params.ExpiresInSeconds > 3600 {
-		params.ExpiresInSeconds = 3600 // Default to 1 hour if out of bounds or omitted
-	}
-
 	token, err := auth.MakeJWT(
 		user.ID,
 		cfg.jwtSecret,
-		time.Duration(params.ExpiresInSeconds)*time.Second,
+		time.Duration(ExpiresInSeconds)*time.Second,
 	)
 
 	if err != nil {
 		respondWithError(w, 400, "failed to make jwt token:", err)
 		return
 	}
+	refreshToken, err := auth.MakeRefreshToken()
 
+	if err != nil {
+		respondWithError(w, 400, "failed to make refresh token:", err)
+		return
+	}
+	_, err = cfg.db.CreateRefresh(r.Context(), database.CreateRefreshParams{
+		Token:     refreshToken,
+		UserID:    user.ID,
+		ExpiresAt: time.Now().AddDate(0, 0, 60),
+	})
+
+	if err != nil {
+		respondWithError(w, 400, "failed to make refresh token:", err)
+		return
+	}
 	respondWithJSON(
 		w,
 		200,
@@ -120,7 +133,68 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 				UpdatedAt: user.UpdatedAt,
 				Email:     user.Email,
 			},
-			Token: token,
+			Token:        token,
+			RefreshToken: refreshToken,
 		},
 	)
+}
+
+func (cfg *apiConfig) handlerUpdateUser(w http.ResponseWriter, r *http.Request) {
+	type Params struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(
+			w,
+			401,
+			"failed to get bearer token",
+			err,
+		)
+	}
+
+	userID, err := auth.ValidateJWT(token, os.Getenv("SECRET"))
+	if err != nil {
+		respondWithError(
+			w,
+			401,
+			"failed to get validate token",
+			err,
+		)
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	params := Params{}
+	err = decoder.Decode(&params)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "something went wrong:", err)
+		return
+	}
+
+	hashedPassword, err := auth.HashPassword(params.Password)
+	if err != nil {
+		respondWithError(w, 401, "failed to hash password: ", err)
+		return
+	}
+
+	newUser, err := cfg.db.UpdateDetails(r.Context(), database.UpdateDetailsParams{
+		ID:             userID,
+		Email:          params.Email,
+		HashedPassword: hashedPassword,
+	})
+	if err != nil {
+		respondWithError(w, 401, "failed to update database: ", err)
+		return
+	}
+
+	respondWithJSON(w, 200,
+		User{
+			ID:        newUser.ID,
+			CreatedAt: newUser.CreatedAt,
+			UpdatedAt: newUser.UpdatedAt,
+			Email:     newUser.Email,
+		})
+
 }

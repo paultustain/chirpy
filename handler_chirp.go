@@ -106,6 +106,7 @@ func (cfg *apiConfig) handlerChirpsCreate(w http.ResponseWriter, r *http.Request
 		UserID:    chirp.UserID,
 	})
 }
+
 func (cfg *apiConfig) handlerChirpsRetrieve(w http.ResponseWriter, r *http.Request) {
 	dbChirps, err := cfg.db.GetChirps(r.Context())
 	if err != nil {
@@ -147,4 +148,67 @@ func (cfg *apiConfig) handlerChirpRetrieve(w http.ResponseWriter, r *http.Reques
 		Body:      dbChirp.Body,
 		UserID:    dbChirp.UserID,
 	})
+}
+
+func (cfg *apiConfig) handlerDeleteChirp(w http.ResponseWriter, r *http.Request) {
+	param := r.PathValue("chirpID")
+	chirpID, err := uuid.Parse(param)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "failed to parse chirp ID: ", err)
+		return
+
+	}
+
+	dbChirp, err := cfg.db.GetChirp(r.Context(), chirpID)
+
+	if err != nil {
+		respondWithError(w, 404, "chirp id not found: ", err)
+		return
+	}
+
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(
+			w,
+			401,
+			"failed to get bearer token: ",
+			err,
+		)
+		return
+	}
+
+	userID, err := auth.ValidateJWT(token, os.Getenv("SECRET"))
+	if err != nil {
+		respondWithError(
+			w,
+			401,
+			"failed to get validate token: ",
+			err,
+		)
+		return
+	}
+
+	if dbChirp.UserID != userID {
+		respondWithError(
+			w,
+			403,
+			"cannot delete other users chirp: ",
+			err,
+		)
+		return
+	}
+
+	err = cfg.db.DeleteChirp(r.Context(), dbChirp.ID)
+	if err != nil {
+		respondWithError(
+			w,
+			401,
+			"failed to delete chirp: ",
+			err,
+		)
+		return
+	}
+
+	w.WriteHeader(204)
+
 }
