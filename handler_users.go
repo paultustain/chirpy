@@ -211,9 +211,20 @@ func (cfg *apiConfig) handlerUpdateMembership(w http.ResponseWriter, r *http.Req
 		Data  Data   `json:"data"`
 	}
 
+	key, err := auth.GetAPIKey(r.Header)
+	if err != nil {
+		respondWithError(w, 401, "failed to get api key: ", err)
+		return
+	}
+
+	if key != cfg.polkaSecret {
+		respondWithError(w, 401, "incorrect api secret: ", err)
+		return
+	}
+
 	decoder := json.NewDecoder(r.Body)
 	params := Params{}
-	err := decoder.Decode(&params)
+	err = decoder.Decode(&params)
 	if err != nil {
 		respondWithError(w, 401, "failed to decode params: ", err)
 		return

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -107,15 +108,9 @@ func (cfg *apiConfig) handlerChirpsCreate(w http.ResponseWriter, r *http.Request
 	})
 }
 
-func (cfg *apiConfig) handlerChirpsRetrieve(w http.ResponseWriter, r *http.Request) {
-	dbChirps, err := cfg.db.GetChirps(r.Context())
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Couldn't retrieve chirps", err)
-		return
-	}
-
+func outputChirps(w http.ResponseWriter, chirpList []database.Chirp, order string) {
 	chirps := []Chirp{}
-	for _, dbChirp := range dbChirps {
+	for _, dbChirp := range chirpList {
 		chirps = append(chirps, Chirp{
 			ID:        dbChirp.ID,
 			CreatedAt: dbChirp.CreatedAt,
@@ -125,7 +120,47 @@ func (cfg *apiConfig) handlerChirpsRetrieve(w http.ResponseWriter, r *http.Reque
 		})
 	}
 
+	if order != "" {
+		if order == "asc" {
+			sort.Slice(chirps, func(i, j int) bool { return chirps[i].CreatedAt.Before(chirps[j].CreatedAt) })
+		} else if order == "desc" {
+			sort.Slice(chirps, func(i, j int) bool { return chirps[i].CreatedAt.After(chirps[j].CreatedAt) })
+		} else {
+			respondWithError(w, 401, "invalid sort order", errors.New(order))
+		}
+	}
+
 	respondWithJSON(w, http.StatusOK, chirps)
+}
+
+func (cfg *apiConfig) handlerChirpsRetrieve(w http.ResponseWriter, r *http.Request) {
+	s := r.URL.Query().Get("author_id")
+	order := r.URL.Query().Get("sort")
+
+	if s == "" {
+		dbChirps, err := cfg.db.GetChirps(r.Context())
+		if err != nil {
+			respondWithError(w, http.StatusInternalServerError, "Couldn't retrieve chirps", err)
+			return
+		}
+		outputChirps(w, dbChirps, order)
+
+	} else {
+		authorID, err := uuid.Parse(s)
+		if err != nil {
+			respondWithError(w, http.StatusInternalServerError, "Couldn't parse author-id", err)
+			return
+		}
+		dbChirps, err := cfg.db.GetChirpsByAuthor(r.Context(), authorID)
+		if err != nil {
+			respondWithError(w, http.StatusInternalServerError, "Couldn't retrieve chirps", err)
+			return
+		}
+
+		outputChirps(w, dbChirps, order)
+
+	}
+
 }
 
 func (cfg *apiConfig) handlerChirpRetrieve(w http.ResponseWriter, r *http.Request) {
