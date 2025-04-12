@@ -17,11 +17,12 @@ type Parameters struct {
 }
 
 type User struct {
-	ID        uuid.UUID `json:"id"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Email     string    `json:"email"`
-	Password  string    `json:"-"`
+	ID          uuid.UUID `json:"id"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	Email       string    `json:"email"`
+	Password    string    `json:"-"`
+	IsChirpyRed bool      `json:"is_chirpy_red"`
 }
 
 const ExpiresInSeconds = 3600
@@ -61,10 +62,11 @@ func (cfg *apiConfig) handlerUsers(w http.ResponseWriter, r *http.Request) {
 
 	respondWithJSON(w, http.StatusCreated, response{
 		User: User{
-			ID:        userID,
-			CreatedAt: user.CreatedAt,
-			UpdatedAt: user.UpdatedAt,
-			Email:     user.Email,
+			ID:          userID,
+			CreatedAt:   user.CreatedAt,
+			UpdatedAt:   user.UpdatedAt,
+			Email:       user.Email,
+			IsChirpyRed: user.IsChirpyRed.Bool,
 		},
 	})
 }
@@ -128,10 +130,11 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 		200,
 		response{
 			User: User{
-				ID:        user.ID,
-				CreatedAt: user.CreatedAt,
-				UpdatedAt: user.UpdatedAt,
-				Email:     user.Email,
+				ID:          user.ID,
+				CreatedAt:   user.CreatedAt,
+				UpdatedAt:   user.UpdatedAt,
+				Email:       user.Email,
+				IsChirpyRed: user.IsChirpyRed.Bool,
 			},
 			Token:        token,
 			RefreshToken: refreshToken,
@@ -196,5 +199,41 @@ func (cfg *apiConfig) handlerUpdateUser(w http.ResponseWriter, r *http.Request) 
 			UpdatedAt: newUser.UpdatedAt,
 			Email:     newUser.Email,
 		})
+
+}
+
+func (cfg *apiConfig) handlerUpdateMembership(w http.ResponseWriter, r *http.Request) {
+	type Data struct {
+		UserID string `json:"user_id"`
+	}
+	type Params struct {
+		Event string `json:"event"`
+		Data  Data   `json:"data"`
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	params := Params{}
+	err := decoder.Decode(&params)
+	if err != nil {
+		respondWithError(w, 401, "failed to decode params: ", err)
+		return
+	}
+
+	if params.Event != "user.upgraded" {
+		w.WriteHeader(204)
+		return
+	}
+	userID, err := uuid.Parse(params.Data.UserID)
+	if err != nil {
+		respondWithError(w, 401, "failed to parse userid: ", err)
+		return
+	}
+	_, err = cfg.db.UpgradeMembership(r.Context(), userID)
+	if err != nil {
+		respondWithError(w, 404, "failed to upgrade database: ", err)
+		return
+	}
+
+	w.WriteHeader(204)
 
 }
